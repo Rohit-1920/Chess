@@ -1,0 +1,125 @@
+version: "3.9"
+
+# ════════════════════════════════════════════════════════════════
+# ChessMind — Full Stack Docker Compose
+# Launches: MySQL · Redis · Ollama · Spring Boot · Next.js
+#
+# Usage:
+#   docker compose up -d --build        ← first launch (builds images)
+#   docker compose up -d                ← subsequent starts
+#   docker compose logs -f              ← watch all logs
+#   docker compose down                 ← stop
+#   docker compose down -v              ← stop + wipe data
+# ════════════════════════════════════════════════════════════════
+
+services:
+
+  # ─── MySQL 8 ──────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: chess-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: chessdb
+      MYSQL_USER: ${DB_USER:-chessuser}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-chesspassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DB_USER:-chessuser}", "-p${DB_PASSWORD:-chesspassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  # ─── Redis 7 ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: chess-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── Ollama (Local LLM) ───────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: chess-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment for NVIDIA GPU support on EC2 GPU instances:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ─── Spring Boot Backend ──────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chess-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: mysql
+      REDIS_HOST: redis
+      OLLAMA_URL: http://ollama:11434
+    ports:
+      - "8080:8080"
+    volumes:
+      - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/auth/me || exit 0"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # ─── Next.js Frontend ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:8080/ws}
+    container_name: chess-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:8080/ws}
+    ports:
+      - "3000:3000"
+
+volumes:
+  mysql_data:
+  redis_data:
+  ollama_data:
+  backend_logs:

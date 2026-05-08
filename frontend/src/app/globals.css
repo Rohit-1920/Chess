@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Variables ────────────────────────────────────────────────────────── */
+:root {
+  --font-playfair: 'Playfair Display', Georgia, serif;
+  --font-dm-sans: 'DM Sans', system-ui, sans-serif;
+  --font-dm-mono: 'DM Mono', monospace;
+
+  --gold: #e8b423;
+  --gold-dim: rgba(232, 180, 35, 0.15);
+  --gold-border: rgba(232, 180, 35, 0.25);
+  --surface-950: #080808;
+  --surface-900: #111111;
+  --surface-800: #1a1a1a;
+  --surface-700: #242424;
+  --surface-600: #2e2e2e;
+  --cream: #f0e6c4;
+  --text-muted: rgba(240, 230, 196, 0.45);
+  --text-soft:  rgba(240, 230, 196, 0.7);
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+html {
+  font-family: var(--font-dm-sans);
+  background-color: var(--surface-950);
+  color: var(--cream);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--surface-950);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(232, 180, 35, 0.04) 0%, transparent 60%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+}
+
+/* ─── Typography ───────────────────────────────────────────────────────────── */
+.font-display { font-family: var(--font-playfair); }
+.font-body    { font-family: var(--font-dm-sans); }
+.font-mono    { font-family: var(--font-dm-mono); }
+
+/* ─── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface-900); }
+::-webkit-scrollbar-thumb { background: var(--surface-600); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+
+/* ─── Utility Classes ──────────────────────────────────────────────────────── */
+.gold-text {
+  background: linear-gradient(135deg, #fcd97c 0%, #e8b423 50%, #c99a10 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glass {
+  background: rgba(26, 26, 26, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(240, 230, 196, 0.06);
+}
+
+.gold-border {
+  border: 1px solid var(--gold-border);
+}
+
+.btn-gold {
+  @apply relative inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-body font-medium text-surface-950 transition-all duration-200;
+  background: linear-gradient(135deg, #fcd97c 0%, #e8b423 60%, #c99a10 100%);
+}
+.btn-gold:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 24px rgba(232, 180, 35, 0.4);
+}
+.btn-gold:active { transform: translateY(0); }
+
+.btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-body font-medium transition-all duration-200;
+  color: var(--cream);
+  border: 1px solid rgba(240, 230, 196, 0.12);
+  background: transparent;
+}
+.btn-ghost:hover {
+  border-color: var(--gold-border);
+  background: var(--gold-dim);
+  color: #fcd97c;
+}
+
+.input-dark {
+  @apply w-full px-4 py-3 rounded-lg text-cream placeholder-text-muted transition-all duration-200 outline-none;
+  background: var(--surface-800);
+  border: 1px solid rgba(240, 230, 196, 0.1);
+  font-family: var(--font-dm-sans);
+}
+.input-dark:focus {
+  border-color: var(--gold-border);
+  box-shadow: 0 0 0 3px rgba(232, 180, 35, 0.1);
+}
+
+/* ─── Chess board overrides ────────────────────────────────────────────────── */
+.rce-board-wrapper { border-radius: 8px; overflow: hidden; }
+
+/* ─── Animations ───────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(232,180,35,0.4); }
+  70%  { box-shadow: 0 0 0 10px rgba(232,180,35,0); }
+  100% { box-shadow: 0 0 0 0 rgba(232,180,35,0); }
+}
+
+.animate-fade-up   { animation: fadeUp 0.5s ease both; }
+.animate-fade-in   { animation: fadeIn 0.4s ease both; }
+.animate-pulse-ring { animation: pulse-ring 2s ease-in-out infinite; }
+
+/* ─── Stagger animation delays ─────────────────────────────────────────────── */
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }

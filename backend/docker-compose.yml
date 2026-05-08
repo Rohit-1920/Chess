@@ -1,0 +1,102 @@
+version: "3.9"
+
+# ─── Chess App — Full Local Stack ────────────────────────────────
+# Services: MySQL 8, Redis 7, Ollama, Spring Boot backend
+#
+# Usage:
+#   docker compose up -d          # start everything
+#   docker compose logs -f backend # tail backend logs
+#   docker compose down -v         # stop and remove volumes
+
+services:
+
+  # ─── MySQL 8 ──────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: chess-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: chessdb
+      MYSQL_USER: chessuser
+      MYSQL_PASSWORD: chesspassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./src/main/resources/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "chessuser", "-pchesspassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ─── Redis 7 ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: chess-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── Ollama (local LLM) ───────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: chess-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # GPU support (uncomment if you have NVIDIA GPU on the EC2 instance)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ─── Spring Boot Backend ──────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chess-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: chessdb
+      DB_USER: chessuser
+      DB_PASSWORD: chesspassword
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3
+      JWT_SECRET: ${JWT_SECRET:-c2hlc3NhcHBzdXBlcnNlY3JldGtleW11c3RiZWF0bGVhc3Q1MTJiaXRzbG9uZ2ZvckhTNTEy}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    ports:
+      - "8080:8080"
+    volumes:
+      - backend_logs:/app/logs
+
+volumes:
+  mysql_data:
+  redis_data:
+  ollama_data:
+  backend_logs:
