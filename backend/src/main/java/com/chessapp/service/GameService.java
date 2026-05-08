@@ -7,6 +7,7 @@ import com.chessapp.dto.response.MoveResponse;
 import com.chessapp.enums.AiDifficulty;
 import com.chessapp.enums.GameMode;
 import com.chessapp.enums.GameStatus;
+import com.chessapp.enums.GameTheme;
 import com.chessapp.exception.BadRequestException;
 import com.chessapp.exception.ForbiddenException;
 import com.chessapp.exception.ResourceNotFoundException;
