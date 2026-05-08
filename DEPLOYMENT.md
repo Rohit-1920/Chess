@@ -1,176 +1,303 @@
 # ChessMind — Complete Deployment Guide
-# EC2 Instance: m7i-flex.large (2 vCPU, 8 GB RAM)
-# OS: Ubuntu 22.04 LTS
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 0: EC2 Setup — Security Group Inbound Rules
-# ═══════════════════════════════════════════════════════════════
-# Port 22   — SSH (your IP only)
-# Port 80   — HTTP (0.0.0.0/0)
-# Port 443  — HTTPS (0.0.0.0/0)   [if using SSL]
-# Port 3000 — Next.js (optional, for direct access)
-# Port 8080 — Backend (optional, for API testing)
+> **Stack:** Java 17 · Spring Boot 3 · Next.js 14 · MySQL 8 · Redis 7 · Ollama (llama3) · Docker
+> **Target:** Any Ubuntu 22.04 / 24.04 server (AWS EC2 m7i-flex.large recommended)
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 1: SSH into your EC2 instance
-# ═══════════════════════════════════════════════════════════════
-ssh -i your-key.pem ubuntu@<EC2-PUBLIC-IP>
+---
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 2: Install Dependencies
-# ═══════════════════════════════════════════════════════════════
+## Prerequisites
+
+| Requirement | Minimum |
+|---|---|
+| OS | Ubuntu 22.04 LTS or 24.04 LTS |
+| RAM | 8 GB |
+| CPU | 2 vCPU |
+| Disk | 20 GB free (llama3 model alone is 4.7 GB) |
+| Ports open | 22, 3000, 8080 |
+
+---
+
+## Part 1 — Server Setup
+
+### 1.1 Update the system
+
+```bash
 sudo apt update && sudo apt upgrade -y
+```
 
-# Install Docker
+### 1.2 Install Docker
+
+```bash
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker ubuntu
+sudo usermod -aG docker $USER
 newgrp docker
 
-# Install Docker Compose
+# Verify
+docker --version
+# Docker version 24.x or higher
+```
+
+### 1.3 Install Docker Compose plugin
+
+```bash
 sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
      -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
-docker-compose --version
 
-# Install Java 17 (for building the backend locally if needed)
-sudo apt install -y openjdk-17-jdk
-java -version
+# Verify
+docker compose version
+# Docker Compose version v2.x
+```
 
-# Install Node.js 20 (for building frontend locally if needed)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-node --version
+---
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 3: Upload your project to EC2
-# ═══════════════════════════════════════════════════════════════
-# From your LOCAL machine (not EC2):
-scp -i your-key.pem -r ./chess-webapp ubuntu@<EC2-PUBLIC-IP>:~/
+## Part 2 — Get the Code
 
-# OR use git:
-# git clone https://github.com/yourname/chess-webapp.git ~/chess-webapp
+### 2.1 Clone the repository
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 4: Configure Environment Variables
-# ═══════════════════════════════════════════════════════════════
-cd ~/chess-webapp
+```bash
+git clone https://github.com/Rohit-1920/Chess.git
+cd Chess
+ls
+# You should see: backend/  frontend/  docker-compose.yml  .env.example  DEPLOYMENT.md
+```
 
-# Generate a strong JWT secret
+---
+
+## Part 3 — Configure Environment Variables
+
+### 3.1 Get your server's public IP
+
+```bash
+curl -s http://checkip.amazonaws.com
+# Example output: 13.201.41.227
+# Save this IP — you will use it in the next steps
+```
+
+### 3.2 Generate a secure JWT secret
+
+```bash
 JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-echo "JWT_SECRET: $JWT_SECRET"
+echo $JWT_SECRET
+# Copy this output — you will need it below
+```
 
-# Create backend .env
-cat > backend/.env << EOF
+### 3.3 Create the root `.env` file
+
+```bash
+# Replace YOUR_SERVER_IP with the IP from Step 3.1
+# Replace YOUR_JWT_SECRET with the value from Step 3.2
+
+cat > ~/Chess/.env << EOF
+EC2_IP=YOUR_SERVER_IP
+DB_USER=chessuser
+DB_PASSWORD=chess_secure_pass_123
+MYSQL_ROOT_PASSWORD=root_secure_pass_123
+JWT_SECRET=YOUR_JWT_SECRET
+NEXT_PUBLIC_API_URL=http://YOUR_SERVER_IP:8080
+NEXT_PUBLIC_WS_URL=http://YOUR_SERVER_IP:8080/ws
+EOF
+```
+
+Example with real values:
+```bash
+cat > ~/Chess/.env << EOF
+EC2_IP=13.201.41.227
+DB_USER=chessuser
+DB_PASSWORD=chess_secure_pass_123
+MYSQL_ROOT_PASSWORD=root_secure_pass_123
+JWT_SECRET=D8XySoISa3jboj/w03hENvKv/yYD/dwWGZyD6vyzeg8aq23mn5ldLv7+j1L3pPpEe+p6n1iIQsgipQS/9wnLpw==
+NEXT_PUBLIC_API_URL=http://13.201.41.227:8080
+NEXT_PUBLIC_WS_URL=http://13.201.41.227:8080/ws
+EOF
+```
+
+### 3.4 Create the backend `.env` file
+
+```bash
+# Replace YOUR_SERVER_IP and YOUR_JWT_SECRET with your actual values
+
+cat > ~/Chess/backend/.env << EOF
 DB_HOST=mysql
 DB_PORT=3306
 DB_NAME=chessdb
 DB_USER=chessuser
-DB_PASSWORD=chesspassword_$(openssl rand -hex 8)
+DB_PASSWORD=chess_secure_pass_123
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_PASSWORD=
 OLLAMA_URL=http://ollama:11434
 OLLAMA_MODEL=llama3
-JWT_SECRET=${JWT_SECRET}
-FRONTEND_URL=http://<EC2-PUBLIC-IP>:3000
+JWT_SECRET=YOUR_JWT_SECRET
+FRONTEND_URL=http://YOUR_SERVER_IP:3000
 EOF
+```
 
-# Create frontend .env.local
-cat > frontend/.env.local << EOF
-NEXT_PUBLIC_API_URL=http://<EC2-PUBLIC-IP>:8080
-NEXT_PUBLIC_WS_URL=http://<EC2-PUBLIC-IP>:8080/ws
-EOF
+### 3.5 Verify both files
 
-# Replace <EC2-PUBLIC-IP> with your actual IP
-# e.g., sed -i 's/<EC2-PUBLIC-IP>/54.123.45.67/g' backend/.env frontend/.env.local
+```bash
+cat ~/Chess/.env
+cat ~/Chess/backend/.env
+# Make sure your real IP and JWT secret appear in both files
+```
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 5: Update docker-compose.yml to include frontend
-# ═══════════════════════════════════════════════════════════════
-# Add this service to backend/docker-compose.yml:
-cat >> backend/docker-compose.yml << 'EOF'
+---
 
-  frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-    container_name: chess-frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
-    environment:
-      NEXT_PUBLIC_API_URL: http://backend:8080
-      NEXT_PUBLIC_WS_URL: http://backend:8080/ws
-    ports:
-      - "3000:3000"
-EOF
+## Part 4 — Pull the AI Model
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 6: Pull Ollama Model
-# ═══════════════════════════════════════════════════════════════
-# Start Ollama container first
-cd backend
-docker-compose up -d ollama
+### 4.1 Start Ollama container
 
-# Wait for Ollama to be ready (about 30 seconds)
-sleep 30
+```bash
+cd ~/Chess
+docker compose up -d ollama
+sleep 20
+```
 
-# Pull the llama3 model (this will take 5–10 minutes, ~4.7GB)
+### 4.2 Check disk space first
+
+```bash
+df -h /
+# You need at least 6 GB free for llama3
+# If less than 6 GB free, use the smaller model (see note below)
+```
+
+### 4.3 Pull llama3 (default — 4.7 GB, takes 5–10 minutes)
+
+```bash
 docker exec chess-ollama ollama pull llama3
+```
 
-# Verify it downloaded:
+Wait for `success` to appear. Then verify:
+
+```bash
 docker exec chess-ollama ollama list
+# Should show llama3 with size ~4.7 GB
+```
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 7: Build and Start All Services
-# ═══════════════════════════════════════════════════════════════
-cd ~/chess-webapp/backend
+> **If disk space is low (less than 6 GB free)** use the 1 GB model instead:
+> ```bash
+> docker exec chess-ollama ollama pull llama3.2:1b
+> # Then update backend/.env:
+> sed -i 's/OLLAMA_MODEL=llama3/OLLAMA_MODEL=llama3.2:1b/' ~/Chess/backend/.env
+> ```
 
-# Build all images and start services
-docker-compose up -d --build
+---
 
-# Watch logs to ensure healthy startup
-docker-compose logs -f
+## Part 5 — Build and Launch
 
-# Check all containers are running
-docker-compose ps
+### 5.1 Build all Docker images and start all services
 
-# Expected output:
-# chess-mysql     Up (healthy)
-# chess-redis     Up (healthy)
-# chess-ollama    Up
-# chess-backend   Up
-# chess-frontend  Up
+```bash
+cd ~/Chess
+docker compose up -d --build
+```
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 8: Verify Services
-# ═══════════════════════════════════════════════════════════════
-# Test backend health
+> **This takes 8–15 minutes on first run.** It is:
+> - Downloading Maven + Java base images
+> - Compiling 44 Java source files
+> - Downloading npm packages
+> - Building the Next.js production app
+>
+> Subsequent runs use cache and take under 1 minute.
+
+### 5.2 Watch the logs
+
+```bash
+docker compose logs -f
+# Press Ctrl+C to stop watching (containers keep running)
+```
+
+### 5.3 Check all containers are running
+
+```bash
+docker compose ps
+```
+
+Expected output — all 5 containers must show `Up`:
+
+```
+NAME               IMAGE                  STATUS
+chess-mysql        mysql:8.0              Up (healthy)
+chess-redis        redis:7-alpine         Up (healthy)
+chess-ollama       ollama/ollama:latest   Up
+chess-backend      chess-backend:latest   Up (healthy)
+chess-frontend     chess-frontend:latest  Up
+```
+
+> **If any container shows `unhealthy` or `Exiting`**, run:
+> ```bash
+> docker compose up -d
+> # MySQL sometimes needs a second attempt on first boot — this is normal
+> ```
+
+---
+
+## Part 6 — Verify Everything Works
+
+### 6.1 Test the backend API
+
+```bash
 curl http://localhost:8080/api/auth/me
-# Expected: 401 Unauthorized (means backend is running)
+# Expected: {"success":false,"message":"..."} with HTTP 401
+# 401 = correct — it means backend is running and auth is working
+```
 
-# Test Ollama
+### 6.2 Test the frontend
+
+```bash
+curl -I http://localhost:3000
+# Expected: HTTP/1.1 200 OK
+```
+
+### 6.3 Test Ollama
+
+```bash
 curl http://localhost:11434/api/tags
-# Expected: JSON list with llama3 model
+# Expected: JSON listing llama3 model
+```
 
-# Test frontend
-curl http://localhost:3000
-# Expected: HTML
+---
 
-# Open in browser:
-# http://<EC2-PUBLIC-IP>:3000
+## Part 7 — Open in Browser
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 9: (Optional) Set up Nginx Reverse Proxy on Port 80
-# ═══════════════════════════════════════════════════════════════
+```
+http://YOUR_SERVER_IP:3000
+```
+
+Example: `http://13.201.41.227:3000`
+
+---
+
+## Part 8 — AWS Security Group (EC2 Only)
+
+If deploying on AWS EC2, make sure these inbound rules exist:
+
+1. Go to **AWS Console → EC2 → Instances → your instance**
+2. Click **Security → Security groups → Edit inbound rules**
+3. Add:
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| SSH | TCP | 22 | Your IP |
+| Custom TCP | TCP | 3000 | 0.0.0.0/0 |
+| Custom TCP | TCP | 8080 | 0.0.0.0/0 |
+
+4. Click **Save rules**
+
+---
+
+## Part 9 — (Optional) Nginx on Port 80
+
+To serve the app on port 80 instead of 3000:
+
+```bash
 sudo apt install -y nginx
 
-sudo cat > /etc/nginx/sites-available/chessmind << 'NGINX'
+sudo tee /etc/nginx/sites-available/chessmind << 'NGINX'
 server {
     listen 80;
     server_name _;
 
-    # Frontend
     location / {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
@@ -180,16 +307,13 @@ server {
         proxy_cache_bypass $http_upgrade;
     }
 
-    # Backend API
     location /api/ {
         proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 60s;
     }
 
-    # WebSocket
     location /ws/ {
         proxy_pass http://localhost:8080;
         proxy_http_version 1.1;
@@ -204,63 +328,110 @@ NGINX
 sudo ln -s /etc/nginx/sites-available/chessmind /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl restart nginx
+```
 
-# Now access at: http://<EC2-PUBLIC-IP>
+Now open: `http://YOUR_SERVER_IP` (no port number needed)
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 10: Useful Management Commands
-# ═══════════════════════════════════════════════════════════════
-cd ~/chess-webapp/backend
+Also add port 80 to your AWS Security Group inbound rules.
 
-# View logs
-docker-compose logs -f backend
-docker-compose logs -f frontend
-docker-compose logs -f mysql
+---
 
-# Restart a single service
-docker-compose restart backend
-docker-compose restart frontend
+## Management Commands
 
-# Stop everything
-docker-compose down
+```bash
+# View all running containers
+docker compose ps
 
-# Stop + remove volumes (WIPES DATABASE)
-docker-compose down -v
+# View logs for all services
+docker compose logs -f
 
-# Update after code changes
-docker-compose up -d --build backend
-docker-compose up -d --build frontend
+# View logs for one service only
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose logs -f mysql
 
-# Connect to MySQL
-docker exec -it chess-mysql mysql -u chessuser -p chessdb
+# Restart one service
+docker compose restart backend
+docker compose restart frontend
 
-# Connect to Redis CLI
-docker exec -it chess-redis redis-cli
+# Stop all services (data is preserved)
+docker compose down
 
-# Check Ollama models
-docker exec chess-ollama ollama list
+# Stop all services AND delete all data (fresh start)
+docker compose down -v
 
-# ═══════════════════════════════════════════════════════════════
-# TROUBLESHOOTING
-# ═══════════════════════════════════════════════════════════════
-# Backend won't start?
-#   → docker-compose logs backend
-#   → Check DB_HOST, DB_PASSWORD in .env
+# Rebuild and restart after code changes
+docker compose up -d --build
 
-# Ollama returning garbage moves?
-#   → This is normal for chess — LLMs aren't chess engines.
-#   → Use EASY mode for pure random moves.
-#   → Consider adding Stockfish for better AI.
+# Check disk usage
+docker system df
+```
 
-# WebSocket not connecting?
-#   → Check NEXT_PUBLIC_WS_URL points to correct IP
-#   → Ensure port 8080 is open in EC2 Security Group
-#   → Check Nginx WS proxy config above
+---
 
-# Database connection refused?
-#   → Wait 30s after docker-compose up (MySQL takes time)
-#   → docker-compose ps (check mysql is healthy)
+## Troubleshooting
 
-# Out of disk space (llama3 is ~4.7GB)?
-#   → Use a smaller model: ollama pull llama3.2:1b
-#   → Update OLLAMA_MODEL=llama3.2:1b in .env
+### Backend won't start
+```bash
+docker compose logs backend | tail -50
+# Common causes:
+# - MySQL not ready yet → run: docker compose up -d (again)
+# - Wrong DB_PASSWORD in backend/.env
+# - JWT_SECRET missing or too short
+```
+
+### Frontend shows blank page or 502
+```bash
+docker compose logs frontend | tail -50
+# Common causes:
+# - NEXT_PUBLIC_API_URL has wrong IP in .env
+# - Backend not running → check: curl http://localhost:8080/api/auth/me
+```
+
+### MySQL keeps restarting
+```bash
+docker compose logs mysql | tail -30
+# Common causes:
+# - Corrupt volume from previous failed start
+# Fix: docker compose down -v && docker compose up -d --build
+```
+
+### Ollama returns bad chess moves
+This is expected. LLMs are not chess engines. The app uses:
+- **Easy:** Pure random legal moves (always works)
+- **Medium/Hard:** Ollama (may make mistakes — that's intentional for those levels)
+
+### Check all container health
+```bash
+docker inspect chess-mysql | grep -A5 '"Health"'
+docker inspect chess-backend | grep -A5 '"Health"'
+```
+
+### Free up disk space
+```bash
+docker system prune -f
+# Removes stopped containers, unused images, unused networks
+```
+
+---
+
+## Application URLs
+
+| Service | URL |
+|---|---|
+| Frontend (app) | `http://YOUR_SERVER_IP:3000` |
+| Backend API | `http://YOUR_SERVER_IP:8080/api` |
+| Ollama API | `http://YOUR_SERVER_IP:11434` |
+
+---
+
+## First Time Using the App
+
+1. Open `http://YOUR_SERVER_IP:3000`
+2. Click **Get Started** or **Register**
+3. Sign up with email or phone number
+4. Set your username
+5. Click **New Game** on the dashboard
+6. Choose: **vs AI**, **Local 2-Player**, or **Online**
+7. Select difficulty and board theme
+8. Play chess!
