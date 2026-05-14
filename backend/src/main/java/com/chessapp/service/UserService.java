@@ -8,8 +8,6 @@ import com.chessapp.model.User;
 import com.chessapp.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,10 +22,15 @@ public class UserService {
 
     // ─── Get Profile ─────────────────────────────────────────────
 
-    @Cacheable(value = "userProfiles", key = "#userId")
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(Long userId) {
-        User user = getUser(userId);
+        return UserProfileResponse.from(getUser(userId));
+    }
+
+    @Transactional(readOnly = true)
+    public UserProfileResponse getProfileByUsername(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
         return UserProfileResponse.from(user);
     }
 
@@ -36,16 +39,8 @@ public class UserService {
         return userRepository.findByUsername(username);
     }
 
-    @Transactional(readOnly = true)
-    public UserProfileResponse getProfileByUsername(String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User", 0L));
-        return UserProfileResponse.from(user);
-    }
-
     // ─── Update Profile ──────────────────────────────────────────
 
-    @CacheEvict(value = "userProfiles", key = "#userId")
     @Transactional
     public UserProfileResponse updateProfile(Long userId, UpdateProfileRequest req) {
         User user = getUser(userId);
@@ -72,29 +67,26 @@ public class UserService {
         return UserProfileResponse.from(user);
     }
 
-    // ─── Stats Update (called by GameService) ────────────────────
+    // ─── Stats ───────────────────────────────────────────────────
 
-    @CacheEvict(value = "userProfiles", key = "#userId")
     @Transactional
     public void recordWin(Long userId) {
         User user = getUser(userId);
         user.setGamesPlayed(user.getGamesPlayed() + 1);
         user.setGamesWon(user.getGamesWon() + 1);
-        user.setRating(user.getRating() + 15);  // simple Elo delta
+        user.setRating(user.getRating() + 15);
         userRepository.save(user);
     }
 
-    @CacheEvict(value = "userProfiles", key = "#userId")
     @Transactional
     public void recordLoss(Long userId) {
         User user = getUser(userId);
         user.setGamesPlayed(user.getGamesPlayed() + 1);
         user.setGamesLost(user.getGamesLost() + 1);
-        user.setRating(Math.max(100, user.getRating() - 15)); // floor at 100
+        user.setRating(Math.max(100, user.getRating() - 15));
         userRepository.save(user);
     }
 
-    @CacheEvict(value = "userProfiles", key = "#userId")
     @Transactional
     public void recordDraw(Long userId) {
         User user = getUser(userId);

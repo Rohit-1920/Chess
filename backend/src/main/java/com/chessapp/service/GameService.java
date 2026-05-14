@@ -41,11 +41,16 @@ public class GameService {
 
     @Transactional
     public GameResponse createGame(Long requestingUserId, CreateGameRequest req) {
-        User creator = userService.getUser(requestingUserId);
+        // Guest users (null userId) can only create LOCAL_MULTIPLAYER games
+        if (requestingUserId == null) {
+            if (!GameMode.LOCAL_MULTIPLAYER.equals(req.getGameMode())) {
+                throw new BadRequestException("Please sign in to play vs AI or online multiplayer");
+            }
+        }
 
-        validateCreateRequest(req, requestingUserId);
-
-        GameTheme theme = req.getTheme() != null ? req.getTheme() : creator.getPreferredTheme();
+        User creator = requestingUserId != null ? userService.getUser(requestingUserId) : null;
+        GameTheme theme = req.getTheme() != null ? req.getTheme()
+                : (creator != null ? creator.getPreferredTheme() : GameTheme.CLASSIC);
 
         Game.GameBuilder builder = Game.builder()
                 .gameMode(req.getGameMode())
@@ -53,41 +58,29 @@ public class GameService {
                 .currentFen(Game.INITIAL_FEN);
 
         switch (req.getGameMode()) {
-
             case AI -> {
-                AiDifficulty difficulty = req.getAiDifficulty() != null
-                        ? req.getAiDifficulty() : AiDifficulty.MEDIUM;
+                if (creator == null) throw new BadRequestException("Sign in required to play vs AI");
+                AiDifficulty difficulty = req.getAiDifficulty() != null ? req.getAiDifficulty() : AiDifficulty.MEDIUM;
                 String aiColor = (req.getAiPlaysAs() != null
                         && req.getAiPlaysAs().equalsIgnoreCase("WHITE")) ? "WHITE" : "BLACK";
-
-                builder.aiDifficulty(difficulty)
-                       .aiPlaysAs(aiColor)
-                       .status(GameStatus.IN_PROGRESS);
-
-                // Assign player colours
+                builder.aiDifficulty(difficulty).aiPlaysAs(aiColor).status(GameStatus.IN_PROGRESS);
                 if ("BLACK".equals(aiColor)) {
-                    builder.whitePlayer(creator); // human is white
+                    builder.whitePlayer(creator);
                 } else {
-                    builder.blackPlayer(creator); // human is black
+                    builder.blackPlayer(creator);
                 }
             }
-
             case LOCAL_MULTIPLAYER -> {
-                // No sign-in needed; both players share the device
-                builder.whitePlayer(creator)
-                       .status(GameStatus.IN_PROGRESS);
+                // Guest OR logged-in user — no player assignment needed
+                builder.status(GameStatus.IN_PROGRESS);
+                if (creator != null) builder.whitePlayer(creator);
             }
-
             case ONLINE_MULTIPLAYER -> {
-                // Creator plays white; awaiting second player
-                builder.whitePlayer(creator)
-                       .status(GameStatus.WAITING);
-
+                if (creator == null) throw new BadRequestException("Sign in required for online multiplayer");
+                builder.whitePlayer(creator).status(GameStatus.WAITING);
                 if (req.getOpponentUsername() != null && !req.getOpponentUsername().isBlank()) {
-                    // Direct challenge — pre-assign the black player
-                    userService.findByUsername(req.getOpponentUsername()).ifPresent(opponent ->
-                        builder.blackPlayer(opponent).status(GameStatus.WAITING)
-                    );
+                    userService.findByUsername(req.getOpponentUsername())
+                            .ifPresent(opponent -> builder.blackPlayer(opponent));
                 }
             }
         }
@@ -95,7 +88,7 @@ public class GameService {
         Game game = gameRepository.save(builder.build());
         log.info("Game created: id={} mode={} by userId={}", game.getId(), game.getGameMode(), requestingUserId);
 
-        // If AI plays WHITE it moves first
+        // AI plays first if it's white
         if (game.isAiGame() && "WHITE".equals(game.getAiPlaysAs())) {
             game = makeAiMove(game);
         }
@@ -103,7 +96,7 @@ public class GameService {
         return GameResponse.from(game, requestingUserId);
     }
 
-    // ─── Join Game (Online Multiplayer) ──────────────────────────
+    // ─── Join Game ────────────────────────────────────────────────
 
     @Transactional
     public GameResponse joinGame(Long gameId, Long userId) {
@@ -123,44 +116,37 @@ public class GameService {
         game.setBlackPlayer(joiner);
         game.setStatus(GameStatus.IN_PROGRESS);
         game = gameRepository.save(game);
-
         log.info("User {} joined game {}", userId, gameId);
         return GameResponse.from(game, userId);
     }
 
-    // ─── Make a Move ─────────────────────────────────────────────
+    // ─── Make Move ────────────────────────────────────────────────
 
     @Transactional
     public MoveResponse makeMove(Long gameId, Long userId, MakeMoveRequest req) {
         Game game = getGameOrThrow(gameId);
         validateMoveAllowed(game, userId, req);
 
-        // Apply the human move
         String newFen = chessEngineService.applyMove(
-                game.getCurrentFen(),
-                req.getFromSquare(),
-                req.getToSquare(),
-                req.getPromotionPiece());
+                game.getCurrentFen(), req.getFromSquare(), req.getToSquare(), req.getPromotionPiece());
 
         Move humanMove = persistMove(game, userId, req.getFromSquare(), req.getToSquare(),
                 req.getPromotionPiece(), newFen, false);
         game.setCurrentFen(newFen);
         game.setMoveCount(game.getMoveCount() + 1);
 
-        // Check if game ended after human's move
         MoveResponse.MoveResponseBuilder responseBuilder = MoveResponse.from(humanMove).toBuilder();
 
         if (chessEngineService.isGameOver(newFen)) {
             finaliseGame(game, newFen, userId);
         } else if (game.isAiGame()) {
-            // AI responds immediately
             game = makeAiMove(game);
             Move lastAiMove = moveRepository.findTopByGameIdOrderByMoveNumberDesc(gameId);
-            MoveResponse aiMoveResponse = MoveResponse.from(lastAiMove);
-            responseBuilder.aiMove(aiMoveResponse);
-
+            if (lastAiMove != null) {
+                responseBuilder.aiMove(MoveResponse.from(lastAiMove));
+            }
             if (chessEngineService.isGameOver(game.getCurrentFen())) {
-                finaliseGame(game, game.getCurrentFen(), null); // null = AI won
+                finaliseGame(game, game.getCurrentFen(), null);
             }
         }
 
@@ -169,39 +155,28 @@ public class GameService {
         return responseBuilder.build();
     }
 
-    // ─── Resign ──────────────────────────────────────────────────
+    // ─── Resign ───────────────────────────────────────────────────
 
     @Transactional
     public GameResponse resign(Long gameId, Long userId) {
         Game game = getGameOrThrow(gameId);
+        if (!game.hasPlayer(userId)) throw new ForbiddenException("You are not a player in this game");
+        if (!GameStatus.IN_PROGRESS.equals(game.getStatus())) throw new BadRequestException("Game is not in progress");
 
-        if (!game.hasPlayer(userId)) {
-            throw new ForbiddenException("You are not a player in this game");
-        }
-        if (!GameStatus.IN_PROGRESS.equals(game.getStatus())) {
-            throw new BadRequestException("Game is not in progress");
-        }
-
-        // The other player wins
         String myColor = game.getColorForPlayer(userId);
         User winner = "WHITE".equals(myColor) ? game.getBlackPlayer() : game.getWhitePlayer();
-
         game.setStatus(GameStatus.COMPLETED);
         game.setWinner(winner);
         game = gameRepository.save(game);
-
         updateStats(game, winner);
-
-        log.info("User {} resigned from game {}", userId, gameId);
         return GameResponse.from(game, userId);
     }
 
-    // ─── Get Game ────────────────────────────────────────────────
+    // ─── Queries ──────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public GameResponse getGame(Long gameId, Long requestingUserId) {
-        Game game = getGameOrThrow(gameId);
-        return GameResponse.from(game, requestingUserId);
+        return GameResponse.from(getGameOrThrow(gameId), requestingUserId);
     }
 
     @Transactional(readOnly = true)
@@ -216,79 +191,51 @@ public class GameService {
     @Transactional(readOnly = true)
     public List<GameResponse> getOpenLobbies() {
         return gameRepository.findByStatusOrderByCreatedAtAsc(GameStatus.WAITING)
-                .stream()
-                .map(GameResponse::from)
-                .collect(Collectors.toList());
+                .stream().map(GameResponse::from).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<MoveResponse> getMovesForGame(Long gameId) {
         return moveRepository.findByGameIdOrderByMoveNumberAsc(gameId)
-                .stream()
-                .map(MoveResponse::from)
-                .collect(Collectors.toList());
+                .stream().map(MoveResponse::from).collect(Collectors.toList());
     }
 
-    // ─── Internal — AI Move ──────────────────────────────────────
+    // ─── Internal ─────────────────────────────────────────────────
 
     private Game makeAiMove(Game game) {
         List<String> legalMoves = chessEngineService.getLegalMovesUci(game.getCurrentFen());
         if (legalMoves.isEmpty()) return game;
-
         String uci = ollamaService.getAiMove(game.getCurrentFen(), game.getAiDifficulty(), legalMoves);
         if (uci == null) return game;
-
         String[] parts = chessEngineService.parseUci(uci);
-        String from  = parts[0];
-        String to    = parts[1];
         String promo = parts[2].isBlank() ? null : parts[2];
-
-        String newFen = chessEngineService.applyMove(game.getCurrentFen(), from, to, promo);
-        persistMove(game, null, from, to, promo, newFen, true);
+        String newFen = chessEngineService.applyMove(game.getCurrentFen(), parts[0], parts[1], promo);
+        persistMove(game, null, parts[0], parts[1], promo, newFen, true);
         game.setCurrentFen(newFen);
         game.setMoveCount(game.getMoveCount() + 1);
         return gameRepository.save(game);
     }
 
-    // ─── Internal — Persist ──────────────────────────────────────
-
-    private Move persistMove(Game game, Long playerId,
-                             String from, String to, String promo,
-                             String fenAfter, boolean isAi) {
+    private Move persistMove(Game game, Long playerId, String from, String to,
+                             String promo, String fenAfter, boolean isAi) {
         User player = playerId != null ? userService.getUser(playerId) : null;
-        int  moveNum = game.getMoveCount() + 1;
-
         Move move = Move.builder()
-                .game(game)
-                .player(player)
-                .moveNumber(moveNum)
-                .fromSquare(from)
-                .toSquare(to)
-                .promotionPiece(promo)
-                .fenAfterMove(fenAfter)
-                .isAiMove(isAi)
-                .build();
-
+                .game(game).player(player)
+                .moveNumber(game.getMoveCount() + 1)
+                .fromSquare(from).toSquare(to)
+                .promotionPiece(promo).fenAfterMove(fenAfter)
+                .isAiMove(isAi).build();
         return moveRepository.save(move);
     }
 
-    // ─── Internal — Game End ─────────────────────────────────────
-
     private void finaliseGame(Game game, String fen, Long lastMovingUserId) {
         if (chessEngineService.isCheckmate(fen)) {
-            // The player whose turn it WOULD have been lost → last mover won
             String loserColor = chessEngineService.getSideToMove(fen);
-            User winner;
-            if ("WHITE".equals(loserColor)) {
-                winner = game.getBlackPlayer(); // black checkmated white
-            } else {
-                winner = game.getWhitePlayer();
-            }
+            User winner = "WHITE".equals(loserColor) ? game.getBlackPlayer() : game.getWhitePlayer();
             game.setStatus(GameStatus.COMPLETED);
             game.setWinner(winner);
             updateStats(game, winner);
         } else {
-            // Stalemate / draw
             game.setStatus(GameStatus.DRAW);
             if (game.getWhitePlayer() != null) userService.recordDraw(game.getWhitePlayer().getId());
             if (game.getBlackPlayer() != null) userService.recordDraw(game.getBlackPlayer().getId());
@@ -297,29 +244,14 @@ public class GameService {
 
     private void updateStats(Game game, User winner) {
         if (winner == null) return;
-
-        Long whitId = game.getWhitePlayer() != null ? game.getWhitePlayer().getId() : null;
+        Long whiteId = game.getWhitePlayer() != null ? game.getWhitePlayer().getId() : null;
         Long blackId = game.getBlackPlayer() != null ? game.getBlackPlayer().getId() : null;
-
-        if (winner.getId().equals(whitId)) {
-            userService.recordWin(whitId);
+        if (winner.getId().equals(whiteId)) {
+            userService.recordWin(whiteId);
             if (blackId != null) userService.recordLoss(blackId);
         } else if (winner.getId().equals(blackId)) {
             userService.recordWin(blackId);
-            if (whitId != null) userService.recordLoss(whitId);
-        }
-    }
-
-    // ─── Internal — Validation ───────────────────────────────────
-
-    private void validateCreateRequest(CreateGameRequest req, Long userId) {
-        if (GameMode.AI.equals(req.getGameMode()) && req.getAiDifficulty() == null) {
-            req.setAiDifficulty(AiDifficulty.MEDIUM); // sensible default
-        }
-
-        long activeGames = gameRepository.countActiveGamesByUserId(userId);
-        if (activeGames >= 10) {
-            throw new BadRequestException("You have too many active games. Please finish or resign them first.");
+            if (whiteId != null) userService.recordLoss(whiteId);
         }
     }
 
@@ -327,31 +259,25 @@ public class GameService {
         if (!GameStatus.IN_PROGRESS.equals(game.getStatus())) {
             throw new BadRequestException("Game is not in progress");
         }
+        // For LOCAL_MULTIPLAYER — no auth check needed, anyone can move
+        if (GameMode.LOCAL_MULTIPLAYER.equals(game.getGameMode())) return;
 
-        // Determine whose turn it is from FEN
-        String sideToMove = chessEngineService.getSideToMove(game.getCurrentFen()); // "WHITE" | "BLACK"
+        // For AI and ONLINE — must be a player and must be your turn
+        if (userId == null) throw new ForbiddenException("Sign in required");
+        if (!game.hasPlayer(userId)) throw new ForbiddenException("You are not a player in this game");
 
-        if (GameMode.AI.equals(game.getGameMode()) || GameMode.ONLINE_MULTIPLAYER.equals(game.getGameMode())) {
-            // Player must be in this game
-            if (!game.hasPlayer(userId)) {
-                throw new ForbiddenException("You are not a player in this game");
-            }
-            // Player must play their correct colour
-            String playerColor = game.getColorForPlayer(userId);
-            if (!sideToMove.equals(playerColor)) {
-                throw new BadRequestException("It is not your turn (you play " + playerColor + ", current turn: " + sideToMove + ")");
-            }
-            // Cannot move if it's the AI's turn
-            if (GameMode.AI.equals(game.getGameMode()) && sideToMove.equals(game.getAiPlaysAs())) {
-                throw new BadRequestException("It is the AI's turn");
-            }
+        String sideToMove = chessEngineService.getSideToMove(game.getCurrentFen());
+        String playerColor = game.getColorForPlayer(userId);
+        if (!sideToMove.equals(playerColor)) {
+            throw new BadRequestException("It is not your turn");
         }
-        // For LOCAL_MULTIPLAYER, no user-colour checks — whoever is sitting at the board moves
+        if (GameMode.AI.equals(game.getGameMode()) && sideToMove.equals(game.getAiPlaysAs())) {
+            throw new BadRequestException("It is the AI's turn");
+        }
     }
 
     private Game getGameOrThrow(Long gameId) {
         return gameRepository.findByIdWithPlayers(gameId)
                 .orElseThrow(() -> new ResourceNotFoundException("Game", gameId));
     }
-
 }

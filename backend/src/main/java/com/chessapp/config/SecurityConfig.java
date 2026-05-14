@@ -37,14 +37,10 @@ public class SecurityConfig {
     @Value("${app.frontend-url}")
     private String frontendUrl;
 
-    // ─── Password Encoder ────────────────────────────────────────
-
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
     }
-
-    // ─── Auth Provider ───────────────────────────────────────────
 
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
@@ -59,8 +55,6 @@ public class SecurityConfig {
         return config.getAuthenticationManager();
     }
 
-    // ─── Filter Chain ────────────────────────────────────────────
-
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -69,10 +63,19 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 // Public auth endpoints
-                .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                .requestMatchers(HttpMethod.POST,
+                    "/api/auth/register",
+                    "/api/auth/login",
+                    "/api/auth/refresh").permitAll()
+                // Guest can create and view LOCAL_MULTIPLAYER games
+                .requestMatchers(HttpMethod.POST, "/api/games").permitAll()
+                .requestMatchers(HttpMethod.GET,  "/api/games/lobby").permitAll()
+                .requestMatchers(HttpMethod.GET,  "/api/games/{gameId}").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/games/{gameId}/moves").permitAll()
+                .requestMatchers(HttpMethod.GET,  "/api/games/{gameId}/moves").permitAll()
                 // WebSocket handshake
                 .requestMatchers("/ws/**").permitAll()
-                // Actuator health (optional)
+                // Actuator health
                 .requestMatchers("/actuator/health").permitAll()
                 // Everything else requires authentication
                 .anyRequest().authenticated()
@@ -83,12 +86,15 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // ─── CORS ────────────────────────────────────────────────────
-
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
-        cfg.setAllowedOriginPatterns(List.of(frontendUrl, "http://localhost:3000", "http://127.0.0.1:3000"));
+        cfg.setAllowedOriginPatterns(List.of(
+            frontendUrl,
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://*:3000"
+        ));
         cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         cfg.setAllowedHeaders(List.of("*"));
         cfg.setAllowCredentials(true);

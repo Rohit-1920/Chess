@@ -110,3 +110,16 @@ body {
 .delay-300 { animation-delay: 300ms; }
 .delay-400 { animation-delay: 400ms; }
 .delay-500 { animation-delay: 500ms; }
+
+/* ─── Explicit placeholder fix ─── */
+input::placeholder {
+  color: rgba(240, 230, 196, 0.35) !important;
+  opacity: 1;
+}
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f0e6c4;
+  -webkit-box-shadow: 0 0 0 1000px #1a1a1a inset;
+  transition: background-color 5000s ease-in-out 0s;
+}

@@ -16,19 +16,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/**
- * REST controller for the game lifecycle.
- *
- * Endpoints:
- *   POST   /api/games                 — create a new game
- *   POST   /api/games/{id}/join       — join an online multiplayer game
- *   GET    /api/games/{id}            — get game state
- *   POST   /api/games/{id}/moves      — make a move
- *   GET    /api/games/{id}/moves      — full move history
- *   POST   /api/games/{id}/resign     — resign the game
- *   GET    /api/games/my              — my game history (paginated)
- *   GET    /api/games/lobby           — open games waiting for a second player
- */
 @RestController
 @RequestMapping("/api/games")
 @RequiredArgsConstructor
@@ -36,20 +23,17 @@ public class GameController {
 
     private final GameService gameService;
 
-    // ─── Create ──────────────────────────────────────────────────
-
     @PostMapping
     public ResponseEntity<ApiResponse<GameResponse>> createGame(
             @AuthenticationPrincipal UserDetails userDetails,
             @Valid @RequestBody CreateGameRequest request) {
 
-        Long userId = parseUserId(userDetails);
+        // null userId = guest user
+        Long userId = userDetails != null ? parseUserId(userDetails) : null;
         GameResponse game = gameService.createGame(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok("Game created", game));
     }
-
-    // ─── Join (Online Multiplayer) ────────────────────────────────
 
     @PostMapping("/{gameId}/join")
     public ResponseEntity<ApiResponse<GameResponse>> joinGame(
@@ -57,23 +41,17 @@ public class GameController {
             @PathVariable Long gameId) {
 
         Long userId = parseUserId(userDetails);
-        GameResponse game = gameService.joinGame(gameId, userId);
-        return ResponseEntity.ok(ApiResponse.ok("Joined game", game));
+        return ResponseEntity.ok(ApiResponse.ok("Joined game", gameService.joinGame(gameId, userId)));
     }
-
-    // ─── Get Game State ──────────────────────────────────────────
 
     @GetMapping("/{gameId}")
     public ResponseEntity<ApiResponse<GameResponse>> getGame(
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long gameId) {
 
-        Long userId = parseUserId(userDetails);
-        GameResponse game = gameService.getGame(gameId, userId);
-        return ResponseEntity.ok(ApiResponse.ok(game));
+        Long userId = userDetails != null ? parseUserId(userDetails) : null;
+        return ResponseEntity.ok(ApiResponse.ok(gameService.getGame(gameId, userId)));
     }
-
-    // ─── Make a Move ─────────────────────────────────────────────
 
     @PostMapping("/{gameId}/moves")
     public ResponseEntity<ApiResponse<MoveResponse>> makeMove(
@@ -81,22 +59,16 @@ public class GameController {
             @PathVariable Long gameId,
             @Valid @RequestBody MakeMoveRequest request) {
 
-        Long userId = parseUserId(userDetails);
+        // Guest users (null) can make moves in LOCAL_MULTIPLAYER
+        Long userId = userDetails != null ? parseUserId(userDetails) : null;
         MoveResponse result = gameService.makeMove(gameId, userId, request);
         return ResponseEntity.ok(ApiResponse.ok("Move accepted", result));
     }
 
-    // ─── Move History ────────────────────────────────────────────
-
     @GetMapping("/{gameId}/moves")
-    public ResponseEntity<ApiResponse<List<MoveResponse>>> getMoves(
-            @PathVariable Long gameId) {
-
-        List<MoveResponse> moves = gameService.getMovesForGame(gameId);
-        return ResponseEntity.ok(ApiResponse.ok(moves));
+    public ResponseEntity<ApiResponse<List<MoveResponse>>> getMoves(@PathVariable Long gameId) {
+        return ResponseEntity.ok(ApiResponse.ok(gameService.getMovesForGame(gameId)));
     }
-
-    // ─── Resign ──────────────────────────────────────────────────
 
     @PostMapping("/{gameId}/resign")
     public ResponseEntity<ApiResponse<GameResponse>> resign(
@@ -104,11 +76,8 @@ public class GameController {
             @PathVariable Long gameId) {
 
         Long userId = parseUserId(userDetails);
-        GameResponse game = gameService.resign(gameId, userId);
-        return ResponseEntity.ok(ApiResponse.ok("You resigned. Better luck next time!", game));
+        return ResponseEntity.ok(ApiResponse.ok("You resigned", gameService.resign(gameId, userId)));
     }
-
-    // ─── My Games (paginated) ────────────────────────────────────
 
     @GetMapping("/my")
     public ResponseEntity<ApiResponse<List<GameResponse>>> getMyGames(
@@ -117,21 +86,15 @@ public class GameController {
             @RequestParam(defaultValue = "20") int size) {
 
         Long userId = parseUserId(userDetails);
-        List<GameResponse> games = gameService.getMyGames(userId, page, Math.min(size, 50));
-        return ResponseEntity.ok(ApiResponse.ok(games));
+        return ResponseEntity.ok(ApiResponse.ok(gameService.getMyGames(userId, page, Math.min(size, 50))));
     }
-
-    // ─── Open Lobby ──────────────────────────────────────────────
 
     @GetMapping("/lobby")
     public ResponseEntity<ApiResponse<List<GameResponse>>> getLobby() {
-        List<GameResponse> lobby = gameService.getOpenLobbies();
-        return ResponseEntity.ok(ApiResponse.ok(lobby));
+        return ResponseEntity.ok(ApiResponse.ok(gameService.getOpenLobbies()));
     }
 
-    // ─── Internal ────────────────────────────────────────────────
-
-    private Long parseUserId(UserDetails userDetails) {
-        return Long.parseLong(userDetails.getUsername());
+    private Long parseUserId(UserDetails u) {
+        return Long.parseLong(u.getUsername());
     }
 }
