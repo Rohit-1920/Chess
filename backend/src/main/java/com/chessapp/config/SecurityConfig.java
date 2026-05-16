@@ -62,23 +62,28 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Public auth endpoints
+                // ── Public ──────────────────────────────────────────────
                 .requestMatchers(HttpMethod.POST,
                     "/api/auth/register",
                     "/api/auth/login",
                     "/api/auth/refresh").permitAll()
-                // Guest can create and view LOCAL_MULTIPLAYER games
+
+                // Guest-accessible game endpoints
                 .requestMatchers(HttpMethod.POST, "/api/games").permitAll()
                 .requestMatchers(HttpMethod.GET,  "/api/games/lobby").permitAll()
                 .requestMatchers(HttpMethod.GET,  "/api/games/{gameId}").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/games/{gameId}/moves").permitAll()
                 .requestMatchers(HttpMethod.GET,  "/api/games/{gameId}/moves").permitAll()
-                // WebSocket handshake
+
+                // WebSocket
                 .requestMatchers("/ws/**").permitAll()
-                // Actuator health
-                .requestMatchers("/actuator/health").permitAll()
-                // Everything else requires authentication
-                .anyRequest().authenticated()
+
+                // ── Authenticated ────────────────────────────────────────
+                // All /api/** routes not listed above require a valid JWT
+                .requestMatchers("/api/**").authenticated()
+
+                // Everything else (static, actuator, etc.)
+                .anyRequest().permitAll()
             )
             .authenticationProvider(authenticationProvider())
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

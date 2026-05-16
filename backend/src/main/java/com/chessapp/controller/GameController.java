@@ -27,30 +27,41 @@ public class GameController {
     public ResponseEntity<ApiResponse<GameResponse>> createGame(
             @AuthenticationPrincipal UserDetails userDetails,
             @Valid @RequestBody CreateGameRequest request) {
-
-        // null userId = guest user
-        Long userId = userDetails != null ? parseUserId(userDetails) : null;
-        GameResponse game = gameService.createGame(userId, request);
+        Long userId = userId(userDetails);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok("Game created", game));
+                .body(ApiResponse.ok("Game created", gameService.createGame(userId, request)));
     }
 
     @PostMapping("/{gameId}/join")
     public ResponseEntity<ApiResponse<GameResponse>> joinGame(
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long gameId) {
+        return ResponseEntity.ok(ApiResponse.ok("Joined",
+                gameService.joinGame(gameId, requireUserId(userDetails))));
+    }
 
-        Long userId = parseUserId(userDetails);
-        return ResponseEntity.ok(ApiResponse.ok("Joined game", gameService.joinGame(gameId, userId)));
+    @GetMapping("/my")
+    public ResponseEntity<ApiResponse<List<GameResponse>>> getMyGames(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        if (userDetails == null) {
+            return ResponseEntity.ok(ApiResponse.ok(List.of()));
+        }
+        return ResponseEntity.ok(ApiResponse.ok(
+                gameService.getMyGames(requireUserId(userDetails), page, Math.min(size, 50))));
+    }
+
+    @GetMapping("/lobby")
+    public ResponseEntity<ApiResponse<List<GameResponse>>> getLobby() {
+        return ResponseEntity.ok(ApiResponse.ok(gameService.getOpenLobbies()));
     }
 
     @GetMapping("/{gameId}")
     public ResponseEntity<ApiResponse<GameResponse>> getGame(
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long gameId) {
-
-        Long userId = userDetails != null ? parseUserId(userDetails) : null;
-        return ResponseEntity.ok(ApiResponse.ok(gameService.getGame(gameId, userId)));
+        return ResponseEntity.ok(ApiResponse.ok(gameService.getGame(gameId, userId(userDetails))));
     }
 
     @PostMapping("/{gameId}/moves")
@@ -58,11 +69,8 @@ public class GameController {
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long gameId,
             @Valid @RequestBody MakeMoveRequest request) {
-
-        // Guest users (null) can make moves in LOCAL_MULTIPLAYER
-        Long userId = userDetails != null ? parseUserId(userDetails) : null;
-        MoveResponse result = gameService.makeMove(gameId, userId, request);
-        return ResponseEntity.ok(ApiResponse.ok("Move accepted", result));
+        return ResponseEntity.ok(ApiResponse.ok("Move accepted",
+                gameService.makeMove(gameId, userId(userDetails), request)));
     }
 
     @GetMapping("/{gameId}/moves")
@@ -74,27 +82,18 @@ public class GameController {
     public ResponseEntity<ApiResponse<GameResponse>> resign(
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long gameId) {
-
-        Long userId = parseUserId(userDetails);
-        return ResponseEntity.ok(ApiResponse.ok("You resigned", gameService.resign(gameId, userId)));
+        return ResponseEntity.ok(ApiResponse.ok("Resigned",
+                gameService.resign(gameId, requireUserId(userDetails))));
     }
 
-    @GetMapping("/my")
-    public ResponseEntity<ApiResponse<List<GameResponse>>> getMyGames(
-            @AuthenticationPrincipal UserDetails userDetails,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-
-        Long userId = parseUserId(userDetails);
-        return ResponseEntity.ok(ApiResponse.ok(gameService.getMyGames(userId, page, Math.min(size, 50))));
+    // Nullable — for guest-compatible endpoints
+    private Long userId(UserDetails u) {
+        return u != null ? Long.parseLong(u.getUsername()) : null;
     }
 
-    @GetMapping("/lobby")
-    public ResponseEntity<ApiResponse<List<GameResponse>>> getLobby() {
-        return ResponseEntity.ok(ApiResponse.ok(gameService.getOpenLobbies()));
-    }
-
-    private Long parseUserId(UserDetails u) {
+    // Non-null — throws if guest tries to access auth-required endpoint
+    private Long requireUserId(UserDetails u) {
+        if (u == null) throw new RuntimeException("Authentication required");
         return Long.parseLong(u.getUsername());
     }
 }

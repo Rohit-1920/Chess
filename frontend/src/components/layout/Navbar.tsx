@@ -3,12 +3,24 @@ import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { Crown, LayoutDashboard, Users, User, LogOut, Swords } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
+import { useFriendsStore } from '@/store/friendsStore'
+import { NotificationBell } from '@/components/friends/NotificationBell'
 import { toast } from 'sonner'
+import { useEffect } from 'react'
 
 export function Navbar() {
-  const router = useRouter()
+  const router   = useRouter()
   const pathname = usePathname()
   const { user, logout, isAuthenticated } = useAuthStore()
+  const { heartbeat } = useFriendsStore()
+
+  // Keep presence alive
+  useEffect(() => {
+    if (!isAuthenticated()) return
+    heartbeat()
+    const interval = setInterval(heartbeat, 180000) // every 3 min
+    return () => clearInterval(interval)
+  }, [isAuthenticated()])
 
   const handleLogout = async () => {
     await logout()
@@ -18,12 +30,12 @@ export function Navbar() {
 
   const navLinks = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/lobby', label: 'Lobby', icon: Users },
+    { href: '/lobby',     label: 'Lobby',     icon: Users },
+    { href: '/friends',   label: 'Friends',   icon: User },
   ]
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-40 h-16">
-      {/* Glass bar */}
       <div className="h-full glass border-b border-cream/[0.06]">
         <div className="max-w-7xl mx-auto h-full px-6 flex items-center justify-between">
 
@@ -37,7 +49,7 @@ export function Navbar() {
             </span>
           </Link>
 
-          {/* Center nav links (authenticated) */}
+          {/* Nav links */}
           {isAuthenticated() && (
             <div className="hidden md:flex items-center gap-1">
               {navLinks.map(({ href, label, icon: Icon }) => (
@@ -58,44 +70,40 @@ export function Navbar() {
           )}
 
           {/* Right side */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {isAuthenticated() ? (
               <>
-                {/* Play button */}
-                <Link
-                  href="/dashboard"
-                  className="hidden sm:flex items-center gap-2 btn-gold text-sm px-4 py-2"
-                >
+                <Link href="/dashboard" className="hidden sm:flex items-center gap-2 btn-gold text-sm px-4 py-2">
                   <Swords size={15} />
                   Play
                 </Link>
 
-                {/* User menu */}
-                <div className="flex items-center gap-2">
-                  <Link href="/profile" className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-700 transition-colors group">
-                    <div className="w-7 h-7 rounded-full bg-gold-500/20 border border-gold-500/30 flex items-center justify-center">
-                      {user?.avatarUrl
-                        ? <img src={user.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
-                        : <User size={14} className="text-gold-400" />
-                      }
-                    </div>
-                    <span className="text-sm text-cream/70 group-hover:text-cream transition-colors hidden sm:block">
-                      {user?.username}
-                    </span>
-                  </Link>
+                {/* Notification Bell */}
+                <NotificationBell />
 
-                  <button
-                    onClick={handleLogout}
-                    className="p-2 rounded-lg text-cream/40 hover:text-red-400 hover:bg-red-900/20 transition-all"
-                    title="Logout"
-                  >
-                    <LogOut size={16} />
-                  </button>
-                </div>
+                {/* User avatar */}
+                <Link href="/profile" className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-surface-700 transition-colors group">
+                  <div className="w-7 h-7 rounded-full bg-gold-500/20 border border-gold-500/30 flex items-center justify-center overflow-hidden">
+                    {user?.avatarUrl
+                      ? <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
+                      : <User size={14} className="text-gold-400" />
+                    }
+                  </div>
+                  <span className="text-sm text-cream/70 group-hover:text-cream transition-colors hidden sm:block">
+                    {user?.username}
+                  </span>
+                </Link>
+
+                <button
+                  onClick={handleLogout}
+                  className="p-2 rounded-lg text-cream/40 hover:text-red-400 hover:bg-red-900/20 transition-all"
+                >
+                  <LogOut size={16} />
+                </button>
               </>
             ) : (
               <div className="flex items-center gap-3">
-                <Link href="/login" className="btn-ghost text-sm px-4 py-2">Sign In</Link>
+                <Link href="/login"    className="btn-ghost text-sm px-4 py-2">Sign In</Link>
                 <Link href="/register" className="btn-gold text-sm px-4 py-2">Get Started</Link>
               </div>
             )}
